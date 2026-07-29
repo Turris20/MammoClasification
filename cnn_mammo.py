@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
 
-    EPOCHS = 25
+    EPOCHS = 35
     best_val_loss = float("inf")
     best_model_path = "best_convnext_large_cbam.pth"
 
