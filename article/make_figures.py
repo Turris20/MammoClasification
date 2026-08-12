@@ -255,6 +255,128 @@ def figure_pair_weights(df, outdir):
     save(fig, outdir, "fig3_pair_weights")
 
 
+def _box(ax, x, y, w, h, title, body, accent=False):
+    """Caja del diagrama con titulo en negrita y cuerpo debajo."""
+    from matplotlib.patches import FancyBboxPatch
+    edge = VERMILION if accent else MUTED
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.008,rounding_size=0.012",
+                                linewidth=1.1, edgecolor=edge, facecolor="white", zorder=2))
+    ax.text(x + w / 2, y + h - 0.052, title, ha="center", va="top", fontsize=7.2,
+            fontweight="bold", color=INK, zorder=3)
+    ax.text(x + w / 2, y + h - 0.115, body, ha="center", va="top", fontsize=6.6,
+            color=MUTED, linespacing=1.5, zorder=3)
+
+
+def _arrow(ax, x1, y1, x2, y2):
+    ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                arrowprops=dict(arrowstyle="-|>", linewidth=1.0, color=MUTED,
+                                shrinkA=0, shrinkB=0, mutation_scale=9), zorder=1)
+
+
+def figure_pipeline(outdir):
+    """
+    Vista general del metodo.
+
+    La fila superior es el tratamiento de los datos, donde estan las dos
+    correcciones de protocolo del articulo; la inferior es el modelo y la
+    evaluacion. Se destacan en color las tres cajas que constituyen la
+    aportacion, para que el lector distinga lo propuesto de lo estandar.
+    """
+    fig, ax = plt.subplots(figsize=(7.4, 3.5))
+    # Un margen a ambos lados evita que el trazo de las cajas extremas quede
+    # cortado por el recorte ajustado con que se guarda la figura.
+    ax.set_xlim(-0.01, 1.01); ax.set_ylim(0, 1); ax.axis("off")
+
+    w, h, top, bot = 0.213, 0.30, 0.62, 0.14
+    xs = [0.01, 0.265, 0.52, 0.775]
+
+    _box(ax, xs[0], top, w, h, "Multi-source corpus",
+         "six public datasets\n12,029 images\n4,044 patients")
+    _box(ax, xs[1], top, w, h, "Preprocessing",
+         "breast-region crop\nCLAHE, then mask\nbackground set to 0")
+    _box(ax, xs[2], top, w, h, "Patient-grouped split",
+         "StratifiedGroupKFold\nstratified on\n(source, label)", accent=True)
+    _box(ax, xs[3], top, w, h, "Bag construction",
+         "level detected\nper dataset:\npatient or breast", accent=True)
+    for i in range(3):
+        _arrow(ax, xs[i] + w, top + h / 2, xs[i + 1], top + h / 2)
+
+    # Conector de la fila superior a la inferior.
+    _arrow(ax, xs[3] + w / 2, top, xs[3] + w / 2, top - 0.09)
+    ax.plot([xs[0] + w / 2, xs[3] + w / 2], [top - 0.09, top - 0.09],
+            color=MUTED, linewidth=1.0, zorder=1)
+    _arrow(ax, xs[0] + w / 2, top - 0.09, xs[0] + w / 2, bot + h)
+
+    _box(ax, xs[0], bot, w, h, "Instance encoder",
+         "ConvNeXt-S with\nzero-gated CBAM\non last two stages")
+    _box(ax, xs[1], bot, w, h, "Gated attention",
+         "weights sum to 1\nwithin each bag;\nviews can be muted")
+    _box(ax, xs[2], bot, w, h, "Bag decision",
+         "one loss per bag,\nnot per image")
+    _box(ax, xs[3], bot, w, h, "Evaluation",
+         "within-source AUC\noperating point at\n85% sensitivity", accent=True)
+    for i in range(3):
+        _arrow(ax, xs[i] + w, bot + h / 2, xs[i + 1], bot + h / 2)
+
+    ax.text(0.5, 0.035, "Coloured outlines mark the components introduced by this work.",
+            ha="center", fontsize=6.6, color=VERMILION, style="italic")
+    save(fig, outdir, "fig1_pipeline")
+
+
+def figure_preprocessing(image_path, outdir, clahe_clip=2.0):
+    """
+    Efecto del preprocesado sobre una imagen real.
+
+    Requiere una mamografia del corpus: el paso que se quiere mostrar es la
+    eliminacion del texto quemado y los marcadores, que solo aparecen en las
+    imagenes originales y no pueden simularse de forma honesta.
+    """
+    import cv2
+    from cnn_mammo import crop_breast, resize_with_padding
+
+    gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        print(f"  (no se pudo leer {image_path}: se omite la Fig. 2)")
+        return
+
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # El umbral por si solo conserva el texto y los marcadores; lo que los
+    # elimina es quedarse con la componente conexa mayor. El panel central tiñe
+    # la componente retenida para que se vea que se descarta y que se conserva.
+    n_cc, cc = cv2.connectedComponents(otsu, connectivity=8)
+    keep = 1 + int(np.argmax([(cc == i).sum() for i in range(1, n_cc)])) if n_cc > 1 else 0
+    overlay = np.zeros((*otsu.shape, 3), dtype=float)
+    overlay[otsu > 0] = [0.72, 0.72, 0.72]
+    rgb = tuple(int(VERMILION[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    overlay[cc == keep] = rgb
+
+    cropped, mask = crop_breast(gray)
+    enhanced = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8)).apply(cropped)
+    final = np.where(mask > 0, np.maximum(enhanced, 1), 0).astype(np.uint8)
+    final = resize_with_padding(final, (512, 512))
+
+    panels = [
+        (gray, "(a) Raw image", "background, burned-in text\nand annotation artefacts"),
+        (overlay, "(b) Otsu threshold", "coloured: largest connected\ncomponent, retained as breast"),
+        (final, "(c) Model input", "cropped, CLAHE-enhanced,\nbackground exactly zero"),
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 3.0))
+    for ax, (img, title, caption) in zip(axes, panels):
+        if img.ndim == 3:
+            ax.imshow(img)
+        else:
+            ax.imshow(img, cmap="gray", vmin=0, vmax=255)
+        ax.set_title(title, fontsize=8, pad=5)
+        ax.text(0.5, -0.06, caption, transform=ax.transAxes, ha="center", va="top",
+                fontsize=6.6, color=MUTED, linespacing=1.5)
+        ax.set_xticks([]); ax.set_yticks([])
+        for side in ("top", "right", "bottom", "left"):
+            ax.spines[side].set_color(GRID)
+    fig.tight_layout(w_pad=1.5)
+    save(fig, outdir, "fig2_preprocessing")
+
+
 def pick_contrast_source(d):
     """
     Elige la fuente donde el contraste es limpio.
@@ -380,6 +502,9 @@ def main():
     ap.add_argument("--mil", default="runs_mil/predicciones_test_mil.csv")
     ap.add_argument("--attention", default="article/attention_test.csv",
                     help="salida de export_attention.py; si no existe se omite la Fig. 5")
+    ap.add_argument("--example-image", default=None,
+                    help="ruta a una mamografia del corpus para la Fig. 2; conviene "
+                         "elegir una con texto quemado o marcadores visibles")
     ap.add_argument("--attention-source", default=None,
                     help="fuente a la que restringir la Fig. 5; por defecto se elige "
                          "la que mas bolsas aporta de la clase minoritaria")
@@ -391,6 +516,11 @@ def main():
     df = pd.read_csv(args.mil)
     print(f"{len(df)} bolsas, AUC {roc_auc_score(df.y_true, df.prob_malignant):.4f}")
     print("Figuras escritas:")
+    figure_pipeline(args.outdir)             # Fig. 1
+    if args.example_image:
+        figure_preprocessing(args.example_image, args.outdir)   # Fig. 2
+    else:
+        print("  (sin --example-image: se omite la Fig. 2)")
     figure_pair_weights(df, args.outdir)      # Fig. 3
     figure_label_noise(args.outdir)          # Fig. 4
     if os.path.exists(args.attention):
