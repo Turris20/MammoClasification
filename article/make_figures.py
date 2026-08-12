@@ -255,9 +255,97 @@ def figure_pair_weights(df, outdir):
     save(fig, outdir, "fig3_pair_weights")
 
 
+def figure_attention(att_path, outdir):
+    """
+    Evidencia directa del mecanismo que postula el articulo.
+
+    El cancer es unilateral en el 95-98% de los casos, asi que en una bolsa
+    maligna la atencion deberia concentrarse en un lado, mientras que en una
+    benigna no hay lesion que encontrar y ningun lado deberia destacar. El panel
+    izquierdo contrasta esa prediccion; el derecho muestra bolsas concretas.
+    """
+    from scipy import stats
+
+    att = pd.read_csv(att_path)
+    rows = []
+    for (bag, y), g in att.groupby(["bag", "y_true"]):
+        sides = g.groupby("laterality").attention.sum()
+        if len(sides) >= 2:
+            rows.append((bag, y, float(sides.max()), float(g.bag_prob.iloc[0])))
+    d = pd.DataFrame(rows, columns=["bag", "y", "mass", "prob"])
+    if len(d) < 8:
+        print("  (atencion: muy pocas bolsas bilaterales, se omite la figura)")
+        return
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3.4),
+                                   gridspec_kw={"width_ratios": [1, 1.25]})
+
+    groups = [("Benign", d[d.y == 0].mass.values, MUTED),
+              ("Malignant", d[d.y == 1].mass.values, VERMILION)]
+    for i, (label, vals, color) in enumerate(groups):
+        jitter = np.random.default_rng(0).normal(0, 0.055, len(vals))
+        ax1.scatter(np.full(len(vals), i) + jitter, vals, s=9, color=color,
+                    alpha=0.35, edgecolor="none", zorder=2)
+        box = ax1.boxplot([vals], positions=[i], widths=0.42, showfliers=False,
+                          medianprops=dict(color=INK, linewidth=1.6),
+                          boxprops=dict(color=INK, linewidth=1.0),
+                          whiskerprops=dict(color=INK, linewidth=1.0),
+                          capprops=dict(color=INK, linewidth=1.0))
+    ax1.set_xticks([0, 1], [g[0] for g in groups])
+    ax1.set_ylabel("Attention mass on dominant laterality")
+    ax1.axhline(0.5, color=GRID, linewidth=1.0, zorder=0)
+    ax1.text(1.46, 0.505, "evenly split", fontsize=7, color=MUTED,
+             ha="right", va="bottom", style="italic")
+    ax1.set_xlim(-0.55, 1.55); ax1.set_ylim(0.47, 1.02)
+
+    if len(groups[0][1]) > 1 and len(groups[1][1]) > 1:
+        _, pval = stats.mannwhitneyu(groups[1][1], groups[0][1], alternative="greater")
+        ax1.set_title(f"Mann–Whitney one-sided  $p$ = {pval:.3g}", fontsize=8, pad=8)
+    for side in ("top", "right"):
+        ax1.spines[side].set_visible(False)
+    ax1.grid(axis="y", color=GRID, linewidth=0.5); ax1.set_axisbelow(True)
+
+    # Panel derecho: las dos bolsas malignas mas confiadas y la benigna mas confiada.
+    picks = pd.concat([d[d.y == 1].nlargest(2, "prob"), d[d.y == 0].nsmallest(1, "prob")])
+    labels, weights, colors = [], [], []
+    for _, row in picks.iterrows():
+        g = att[att.bag == row.bag].sort_values(["laterality", "view"])
+        for _, inst in g.iterrows():
+            labels.append(f"{inst.laterality}-{inst.view}")
+            weights.append(inst.attention)
+            colors.append(VERMILION if row.y == 1 else MUTED)
+    ypos = np.arange(len(labels))[::-1]
+    ax2.barh(ypos, weights, color=colors, height=0.66)
+    ax2.set_yticks(ypos, labels, fontsize=7)
+    ax2.set_xlabel("Attention weight $a_k$")
+    ax2.set_xlim(0, max(weights) * 1.18)
+
+    # Separadores y anotacion por bolsa.
+    cursor = 0
+    for _, row in picks.iterrows():
+        n = len(att[att.bag == row.bag])
+        top = ypos[cursor]
+        ax2.text(max(weights) * 1.16, top,
+                 f"{'malignant' if row.y == 1 else 'benign'}\n$p$ = {row.prob:.2f}",
+                 fontsize=7, ha="right", va="center",
+                 color=VERMILION if row.y == 1 else MUTED)
+        cursor += n
+        if cursor < len(labels):
+            ax2.axhline(ypos[cursor] + 0.5, color=GRID, linewidth=0.8)
+    for side in ("top", "right", "left"):
+        ax2.spines[side].set_visible(False)
+    ax2.tick_params(axis="y", length=0)
+    ax2.grid(axis="x", color=GRID, linewidth=0.5); ax2.set_axisbelow(True)
+
+    fig.tight_layout(w_pad=2.0)
+    save(fig, outdir, "fig5_attention")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mil", default="runs_mil/predicciones_test_mil.csv")
+    ap.add_argument("--attention", default="article/attention_test.csv",
+                    help="salida de export_attention.py; si no existe se omite la Fig. 5")
     ap.add_argument("--outdir", default="article/figures")
     args = ap.parse_args()
 
@@ -266,10 +354,14 @@ def main():
     df = pd.read_csv(args.mil)
     print(f"{len(df)} bolsas, AUC {roc_auc_score(df.y_true, df.prob_malignant):.4f}")
     print("Figuras escritas:")
-    figure_roc(df, args.outdir)
-    figure_confusion(df, args.outdir)
-    figure_label_noise(args.outdir)
-    figure_pair_weights(df, args.outdir)
+    figure_pair_weights(df, args.outdir)      # Fig. 3
+    figure_label_noise(args.outdir)          # Fig. 4
+    if os.path.exists(args.attention):
+        figure_attention(args.attention, args.outdir)   # Fig. 5
+    else:
+        print(f"  (sin {args.attention}: se omite la Fig. 5)")
+    figure_roc(df, args.outdir)              # Fig. 6
+    figure_confusion(df, args.outdir)        # Fig. 7
 
 
 if __name__ == "__main__":
