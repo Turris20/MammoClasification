@@ -255,7 +255,25 @@ def figure_pair_weights(df, outdir):
     save(fig, outdir, "fig3_pair_weights")
 
 
-def figure_attention(att_path, outdir):
+def pick_contrast_source(d):
+    """
+    Elige la fuente donde el contraste es limpio.
+
+    Restringir a una sola base es necesario, no cosmetico: las bolsas bilaterales
+    no se reparten por igual entre fuentes. cmmd aporta 108 bolsas malignas
+    bilaterales y ninguna benigna, porque sus pacientes benignas se fotografiaron
+    de un solo lado, asi que un contraste agrupado compara en parte bases de datos
+    y no clases. Se toma la fuente que mas bolsas aporta de la clase minoritaria.
+    """
+    best, best_n = None, 0
+    for src, g in d.groupby("source"):
+        n = min((g.y == 1).sum(), (g.y == 0).sum())
+        if n > best_n:
+            best, best_n = src, n
+    return best, best_n
+
+
+def figure_attention(att_path, outdir, source=None):
     """
     Evidencia directa del mecanismo que postula el articulo.
 
@@ -271,8 +289,17 @@ def figure_attention(att_path, outdir):
     for (bag, y), g in att.groupby(["bag", "y_true"]):
         sides = g.groupby("laterality").attention.sum()
         if len(sides) >= 2:
-            rows.append((bag, y, float(sides.max()), float(g.bag_prob.iloc[0])))
-    d = pd.DataFrame(rows, columns=["bag", "y", "mass", "prob"])
+            rows.append((bag, y, float(sides.max()), float(g.bag_prob.iloc[0]),
+                         g.source.iloc[0]))
+    d = pd.DataFrame(rows, columns=["bag", "y", "mass", "prob", "source"])
+
+    if source is None:
+        source, n_minor = pick_contrast_source(d)
+        print(f"  (atencion: contraste restringido a {source}, "
+              f"{n_minor} bolsas en la clase minoritaria)")
+    d = d[d.source == source]
+    att = att[att.source == source]
+
     if len(d) < 8:
         print("  (atencion: muy pocas bolsas bilaterales, se omite la figura)")
         return
@@ -300,7 +327,8 @@ def figure_attention(att_path, outdir):
 
     if len(groups[0][1]) > 1 and len(groups[1][1]) > 1:
         _, pval = stats.mannwhitneyu(groups[1][1], groups[0][1], alternative="greater")
-        ax1.set_title(f"Mann–Whitney one-sided  $p$ = {pval:.3g}", fontsize=8, pad=8)
+        ax1.set_title(f"{source}  ($n$ = {len(d)})\n"
+                      f"Mann–Whitney one-sided  $p$ = {pval:.1e}", fontsize=8, pad=6)
     for side in ("top", "right"):
         ax1.spines[side].set_visible(False)
     ax1.grid(axis="y", color=GRID, linewidth=0.5); ax1.set_axisbelow(True)
@@ -318,14 +346,20 @@ def figure_attention(att_path, outdir):
     ax2.barh(ypos, weights, color=colors, height=0.66)
     ax2.set_yticks(ypos, labels, fontsize=7)
     ax2.set_xlabel("Attention weight $a_k$")
-    ax2.set_xlim(0, max(weights) * 1.18)
+    ax2.set_xlim(0, 1.32)
+    # El valor va escrito porque una barra de longitud cero se lee como dato
+    # ausente, cuando es justo lo contrario: una vista suprimida por completo,
+    # que es el comportamiento que la figura pretende mostrar.
+    for yp, w, c in zip(ypos, weights, colors):
+        ax2.text(w + 0.02, yp, f"{w:.2f}", va="center", fontsize=6.5,
+                 color=c if w > 0.01 else MUTED)
 
     # Separadores y anotacion por bolsa.
     cursor = 0
     for _, row in picks.iterrows():
         n = len(att[att.bag == row.bag])
         top = ypos[cursor]
-        ax2.text(max(weights) * 1.16, top,
+        ax2.text(1.30, top,
                  f"{'malignant' if row.y == 1 else 'benign'}\n$p$ = {row.prob:.2f}",
                  fontsize=7, ha="right", va="center",
                  color=VERMILION if row.y == 1 else MUTED)
@@ -346,6 +380,9 @@ def main():
     ap.add_argument("--mil", default="runs_mil/predicciones_test_mil.csv")
     ap.add_argument("--attention", default="article/attention_test.csv",
                     help="salida de export_attention.py; si no existe se omite la Fig. 5")
+    ap.add_argument("--attention-source", default=None,
+                    help="fuente a la que restringir la Fig. 5; por defecto se elige "
+                         "la que mas bolsas aporta de la clase minoritaria")
     ap.add_argument("--outdir", default="article/figures")
     args = ap.parse_args()
 
@@ -357,7 +394,7 @@ def main():
     figure_pair_weights(df, args.outdir)      # Fig. 3
     figure_label_noise(args.outdir)          # Fig. 4
     if os.path.exists(args.attention):
-        figure_attention(args.attention, args.outdir)   # Fig. 5
+        figure_attention(args.attention, args.outdir, args.attention_source)   # Fig. 5
     else:
         print(f"  (sin {args.attention}: se omite la Fig. 5)")
     figure_roc(df, args.outdir)              # Fig. 6
