@@ -95,9 +95,9 @@ La conclusión: **el límite no lo pone la capacidad del modelo, sino la granula
 
 ## Datos
 
-El índice `mammo-bench.csv` reúne siete colecciones públicas: CMMD, Mini-DDSM, CDD-CESM, INbreast, KAU-BCMD, DMID y RSNA Screening. RSNA se excluye por defecto porque solo contiene casos benignos (sería un atajo perfecto). Tras filtrar quedan **12,029 imágenes de 4,044 pacientes**.
+El índice `mammo-bench.csv` reúne siete colecciones públicas: CMMD, Mini-DDSM, CDD-CESM, INbreast, KAU-BCMD, DMID y RSNA Screening. RSNA se excluye por defecto porque solo contiene casos benignos (sería un atajo perfecto). Tras filtrar quedan 12,029 imágenes de 4,044 pacientes.
 
-Las imágenes **no se incluyen** en el repositorio; deben descargarse de sus proveedores y apuntarse con `--base-dir`.
+Las imágenes no se incluyen en el repositorio; deben descargarse de sus proveedores y apuntarse con `--base-dir`.
 
 ## Cómo reproducirlo
 
@@ -126,10 +126,10 @@ Los pasos 3 y 4 requieren GPU (el entrenamiento MIL a 1024 px usa una bolsa por 
 
 ## Lo que aprendí
 
-- Que una métrica alta no basta: antes de mejorar el modelo hay que auditar **qué está aprendiendo** (fuga de pacientes, atajos de la fuente).
-- A formular una **hipótesis falsable** (el modelo de ruido de etiquetas) y comprobarla con los datos antes de cambiar la arquitectura.
+- Que una métrica alta no basta: antes de mejorar el modelo hay que auditar qué está aprendiendo (fuga de pacientes, atajos de la fuente).
+- A formular una hipótesis falsable (el modelo de ruido de etiquetas) y comprobarla con los datos antes de cambiar la arquitectura.
 - A comparar modelos con la prueba estadística correcta (DeLong pareado) en lugar de mirar si los intervalos se solapan.
-- A documentar los **resultados negativos**, que acotan el problema tanto como los positivos.
+- A documentar los resultados negativos, que acotan el problema tanto como los positivos.
 
 ## Contexto
 
@@ -139,4 +139,4 @@ Proyecto desarrollado en el Laboratorio de Investigación en Inteligencia Artifi
 
 ---
 
-📫 **Contacto:** [GitHub @Turris20](https://github.com/Turris20)
+ **Contacto:** [GitHub @Turris20](https://github.com/Turris20)
